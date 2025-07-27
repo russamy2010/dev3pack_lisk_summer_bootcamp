@@ -1,0 +1,35 @@
+Architecture Diagram to help explain the structure and interaction flow
+
+graph TD
+    subgraph User Interaction
+        A[User Wallet / DApp]
+    end
+
+    subgraph On-Chain Contracts
+        direction LR
+        L[SafeMath Library] -- uses --> VB[VaultBase Contract]
+        VB[VaultBase Contract] -- inherits --> VM[VaultManager Contract]
+    end
+
+    subgraph Ethereum Network & State
+        N[Ethereum Network]
+        S[Blockchain State (Storage)]
+        E[Event Logs]
+    end
+
+    A -- calls payable deposit() --> N
+    A -- calls withdraw() --> N
+
+    N -- transaction --> VM
+    VM -- updates balances mapping --> S
+    VM -- interacts with SafeMath --> L
+    VM -- emits events --> E
+    VM -- sends Ether (payable.call) --> N
+
+    N -- current balance of contract --> VM
+
+    style L fill:#f0f,stroke:#333,stroke-width:2px
+    style VB fill:#9cf,stroke:#333,stroke-width:2px
+    style VM fill:#c9f,stroke:#333,stroke-width:2px
+    style S fill:#ccf,stroke:#333,stroke-width:2px
+    style E fill:#9cf,stroke:#333,stroke-width:2px
