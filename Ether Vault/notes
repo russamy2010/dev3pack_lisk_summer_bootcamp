@@ -1,0 +1,12 @@
+Cost Minimization Notes
+Important to consider costs for the end user. Costs are composed of gwei and wei. This code attempts to minimize this by: 
+
+1. SafeMath Library: While adding a library increases initial deployment cost slightly due to byte code size, it's a one-time cost. The individual arithmetic operations within the library are optimized and prevent costly revert conditions later due to vulnerabilities.
+
+2. mapping(address => uint256) public balances: This is the most efficient way to store individual user balances. Each deposit or withdraw operation involves a storage write (SSTORE opcode), which is one of the most expensive operations.
+
+3. require() Statements: These checks (msg.value > 0, balances[msg.sender] >= _amount, success) are crucial for security and save gas by reverting transactions early if conditions aren't met, preventing wasted computation.
+
+4. Events (Deposit, Withdrawal): As discussed before, events are a very gas-efficient way to log data for off-chain consumption. They don't store data directly in the contract's state, only in the transaction log.
+
+5. payable(msg.sender).call{value: _amount}(""): This is the recommended and most gas-efficient way to send Ether in modern Solidity. It forwards all available gas to the recipient, making it robust against gas limit issues from the recipient's side.
