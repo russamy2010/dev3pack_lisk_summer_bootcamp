@@ -1,0 +1,291 @@
+Here is a whiteboard outlining how this would work in Foundry. 
+Initialize new Foundry project (creates a standard Foundry project structure): 
+  forge init simple-ether-vault
+  cd simple-ether-vault
+Input code (note that the Solidity code for SafeMath.sol, VaultBase.sol, and VaultManager.sol would be placed in the src/ directory. No changes are needed in the core logic of these files themselves.): 
+  // SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+// --- SafeMath Library ---
+// @notice A library for performing safe arithmetic operations on uint256.
+// Prevents integer overflows and underflows, which can lead to critical vulnerabilities.
+library SafeMath {
+    /**
+     * @dev Returns the addition of two unsigned integers, reverting on overflow.
+     */
+    function add(uint256 a, uint256 b) internal pure returns (uint256) {
+        uint256 c = a + b;
+        require(c >= a, "SafeMath: addition overflow"); // c must be greater than or equal to a if no overflow
+        return c;
+    }
+
+    /**
+     * @dev Returns the subtraction of two unsigned integers, reverting on underflow (when the result would be negative).
+     */
+    function sub(uint256 a, uint256 b) internal pure returns (uint256) {
+        require(b <= a, "SafeMath: subtraction underflow"); // b must be less than or equal to a
+        uint256 c = a - b;
+        return c;
+    }
+
+    // You could also add mul, div, mod if needed for more complex math
+    // For this simple vault, add and sub are sufficient.
+}
+
+// --- VaultBase Contract ---
+// @notice Base contract defining common structure and shared logic for vault systems.
+contract VaultBase {
+    using SafeMath for uint256; // Use the SafeMath library for all uint256 operations
+
+    // --- State Variables ---
+    // @notice Mapping to store the Ether balance of each user.
+    mapping(address => uint256) public balances;
+
+    // @notice The address of the contract owner.
+    address public owner;
+
+    // --- Events ---
+    // @notice Emitted when a user deposits Ether into the vault.
+    event Deposit(address indexed user, uint256 amount);
+
+    // @notice Emitted when a user withdraws Ether from the vault.
+    event Withdrawal(address indexed user, uint256 amount);
+
+    // --- Modifiers ---
+    // @notice Restricts a function call to only the contract owner.
+    modifier onlyOwner() {
+        require(msg.sender == owner, "Only owner can call this function.");
+        _; // Placeholder for the function body
+    }
+
+    // --- Constructor ---
+    // @notice Sets the deployer of the contract as the owner.
+    constructor() {
+        owner = msg.sender;
+    }
+
+    // --- Shared Functions (can be overridden by derived contracts if needed) ---
+    // @dev Returns the balance of a specific user.
+    function getUserBalance(address _user) public view returns (uint256) {
+        return balances[_user];
+    }
+}
+
+// --- VaultManager Contract ---
+// @notice Derived contract implementing deposit and withdraw functionalities.
+contract VaultManager is VaultBase {
+    /**
+     * @dev Allows users to deposit Ether into the vault.
+     * The function is payable, meaning it can receive Ether directly.
+     * @notice Checks that the deposited amount is greater than zero.
+     */
+    function deposit() public payable {
+        require(msg.value > 0, "Deposit amount must be greater than zero.");
+
+        // Use SafeMath for addition to prevent overflow
+        balances[msg.sender] = balances[msg.sender].add(msg.value);
+
+        emit Deposit(msg.sender, msg.value);
+    }
+
+    /**
+     * @dev Allows users to withdraw their deposited Ether from the vault.
+     * @param _amount The amount of Ether to withdraw (in wei).
+     * @notice Checks that the user has sufficient balance and the amount is greater than zero.
+     */
+    function withdraw(uint256 _amount) public {
+        // Ensure the amount to withdraw is positive
+        require(_amount > 0, "Withdrawal amount must be greater than zero.");
+        // Ensure the user has sufficient balance
+        require(balances[msg.sender] >= _amount, "Insufficient balance.");
+
+        // Use SafeMath for subtraction to prevent underflow
+        balances[msg.sender] = balances[msg.sender].sub(_amount);
+
+        // Send Ether to the caller
+        (bool success, ) = payable(msg.sender).call{value: _amount}("");
+        require(success, "Failed to send Ether."); // Revert if Ether transfer fails
+
+        emit Withdrawal(msg.sender, _amount);
+    }
+
+    /**
+     * @dev Allows the owner to sweep all Ether from the contract.
+     * Use with caution.
+     */
+    function withdrawAllFundsOwner() public onlyOwner {
+        uint256 contractBalance = address(this).balance;
+        require(contractBalance > 0, "Contract has no Ether to withdraw.");
+
+        // Send all Ether to the owner
+        (bool success, ) = payable(owner).call{value: contractBalance}("");
+        require(success, "Failed to send Ether to owner.");
+
+        // Note: Individual user balances in 'balances' mapping are not affected by this owner withdrawal.
+        // This function is for sweeping the contract's total balance.
+        // For a true "bank-like" system, this logic would need to be more sophisticated.
+        emit Withdrawal(owner, contractBalance);
+    }
+}
+
+Test with Foundry using forge test
+
+Create a new file: test/VaultManager.t.sol
+
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+import "forge-std/Test.sol"; // Import Foundry's testing library
+import "../src/VaultManager.sol"; // Import your VaultManager contract
+
+contract VaultManagerTest is Test {
+    VaultManager public vault; // Declare an instance of your contract
+    address public deployer;
+    address public user1;
+    address public user2;
+
+    function setUp() public {
+        // This function runs before each test function
+        deployer = makeAddr("deployer"); // Create a mock address for the deployer
+        user1 = makeAddr("user1");       // Create a mock address for user1
+        user2 = makeAddr("user2");       // Create a mock address for user2
+
+        vm.startPrank(deployer); // Simulate calls from the deployer address
+        vault = new VaultManager(); // Deploy the contract
+        vm.stopPrank();          // Stop simulating deployer
+    }
+
+    function testDeposit() public {
+        uint256 depositAmount = 1 ether; // 1 Ether in Wei
+
+        // Simulate user1 calling deposit with 1 Ether
+        vm.startPrank(user1);
+        vm.deal(user1, depositAmount); // Give user1 some Ether to deposit
+        vault.deposit{value: depositAmount}();
+        vm.stopPrank();
+
+        // Assertions
+        assertEq(vault.balances(user1), depositAmount, "User1 balance should be 1 Ether after deposit");
+        assertEq(address(vault).balance, depositAmount, "Contract balance should be 1 Ether");
+
+        // Test event emission (requires `emit` in the test function signature if testing specific events)
+        vm.expectEmit(true, true, true, true); // (msg.sender indexed, indexed, indexed, indexed)
+        emit Deposit(user1, depositAmount);
+
+        // Attempt to deposit 0 Ether - should revert
+        vm.startPrank(user1);
+        vm.expectRevert("Deposit amount must be greater than zero."); // Expect a specific revert message
+        vault.deposit{value: 0}();
+        vm.stopPrank();
+    }
+
+    function testWithdraw() public {
+        uint256 initialDeposit = 2 ether;
+        uint256 withdrawAmount = 1 ether;
+
+        // First, deposit some Ether
+        vm.startPrank(user1);
+        vm.deal(user1, initialDeposit);
+        vault.deposit{value: initialDeposit}();
+        vm.stopPrank();
+
+        // Simulate user1 withdrawing 1 Ether
+        vm.startPrank(user1);
+        uint256 user1BalanceBeforeWithdraw = user1.balance; // Get user1's ETH balance before withdrawal
+        vault.withdraw(withdrawAmount);
+        vm.stopPrank();
+
+        // Assertions
+        assertEq(vault.balances(user1), initialDeposit - withdrawAmount, "User1 balance should be 1 Ether after withdrawal");
+        assertEq(address(vault).balance, initialDeposit - withdrawAmount, "Contract balance should be 1 Ether after withdrawal");
+        assertApproxEqAbs(user1.balance, user1BalanceBeforeWithdraw + withdrawAmount, 1e16, "User1 should receive withdrawn amount (approx due to gas)"); // Allow for gas cost difference
+
+        // Test event emission
+        vm.expectEmit(true, true, true, true);
+        emit Withdrawal(user1, withdrawAmount);
+
+        // Test over-withdrawal
+        vm.startPrank(user1);
+        vm.expectRevert("Insufficient balance.");
+        vault.withdraw(2 ether); // Try to withdraw more than remaining 1 Ether
+        vm.stopPrank();
+
+        // Test zero withdrawal
+        vm.startPrank(user1);
+        vm.expectRevert("Withdrawal amount must be greater than zero.");
+        vault.withdraw(0);
+        vm.stopPrank();
+    }
+
+    function testWithdrawAllFundsOwner() public {
+        uint256 initialDeposit = 5 ether;
+
+        // Deposit some Ether from user1
+        vm.startPrank(user1);
+        vm.deal(user1, initialDeposit);
+        vault.deposit{value: initialDeposit}();
+        vm.stopPrank();
+
+        // Try to call owner-only function from non-owner
+        vm.startPrank(user1);
+        vm.expectRevert("Only owner can call this function.");
+        vault.withdrawAllFundsOwner();
+        vm.stopPrank();
+
+        // Owner withdraws all funds
+        vm.startPrank(deployer);
+        uint256 ownerBalanceBeforeWithdraw = deployer.balance;
+        vault.withdrawAllFundsOwner();
+        vm.stopPrank();
+
+        assertEq(address(vault).balance, 0, "Contract balance should be zero after owner withdrawal");
+        assertApproxEqAbs(deployer.balance, ownerBalanceBeforeWithdraw + initialDeposit, 1e16, "Owner should receive all contract funds");
+
+        vm.expectEmit(true, true, true, true);
+        emit Withdrawal(deployer, initialDeposit); // Owner is the 'user' in this specific withdrawal
+    }
+}
+
+Run the tests
+  forge test
+
+Deploy using forge script
+
+Create a new file: script/DeployVault.s.sol
+
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+import "forge-std/Script.sol";
+import "../src/VaultManager.sol";
+
+contract DeployVault is Script {
+    function run() public returns (VaultManager) {
+        // Start broadcasting transactions from the configured sender (e.g., your private key)
+        vm.startBroadcast();
+
+        // Deploy the VaultManager contract
+        VaultManager vault = new VaultManager();
+
+        // Stop broadcasting transactions
+        vm.stopBroadcast();
+
+        // Log the deployed address (optional, but good for tracking)
+        console.log("VaultManager deployed to:", address(vault));
+
+        return vault;
+    }
+}
+
+Run the deployment script
+
+forge script script/DeployVault.s.sol --rpc-url <YOUR_RPC_URL> --private-key <YOUR_PRIVATE_KEY> --broadcast --verify --etherscan-api-key <YOUR_ETHERSCAN_API_KEY> -vvvv
+
+Note: 
+<YOUR_RPC_URL>: An RPC endpoint for the network you want to deploy to (e.g., Sepolia, Ethereum Mainnet). You can get this from services like Alchemy or Infura.
+
+<YOUR_PRIVATE_KEY>: The private key of the account you want to use for deployment. Never hardcode this in your script! Use environment variables or a secure key management system.
+--broadcast: Sends the transaction to the network.
+--verify: Verifies the contract on Etherscan (requires --etherscan-api-key).
+--etherscan-api-key: Your Etherscan API key for verification.
+-vvvv: Verbosity level (more v's mean more output, useful for debugging).
