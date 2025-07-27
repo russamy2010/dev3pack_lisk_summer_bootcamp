@@ -10,3 +10,17 @@ Important to consider costs for the end user. Costs are composed of gwei and wei
 4. Events (Deposit, Withdrawal): As discussed before, events are a very gas-efficient way to log data for off-chain consumption. They don't store data directly in the contract's state, only in the transaction log.
 
 5. payable(msg.sender).call{value: _amount}(""): This is the recommended and most gas-efficient way to send Ether in modern Solidity. It forwards all available gas to the recipient, making it robust against gas limit issues from the recipient's side.
+
+Why use Foundry?
+
+1. Solidity-Native Testing: No JavaScript/TypeScript needed for tests. This means your tests run extremely fast and closer to the EVM.
+
+2. vm (Cheat Codes): Foundry's vm (Virtual Machine) cheat codes (vm.startPrank, vm.deal, vm.expectRevert, vm.expectEmit, etc.) are incredibly powerful for manipulating the EVM state, simulating different accounts, and testing edge cases precisely.
+
+3. Local Development Focus: Foundry is built from the ground up for developer efficiency, offering fast compilation and execution.
+
+4. CLI Driven: Most interactions (testing, compiling, deploying) are done directly from the command line.
+
+5. Robust Deployment Scripts: forge script allows for complex, multi-step deployments written in Solidity, which is very flexible.
+
+6. Gas Snapshots: forge test automatically provides gas usage for each test, which is invaluable for optimization.
