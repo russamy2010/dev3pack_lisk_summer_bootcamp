@@ -1,0 +1,158 @@
+Project Setup
+  forge init secure-piggy-bank
+  cd secure-piggy-bank
+Place SafeMath.sol and PiggyBank.sol inside the src/ directory.
+
+Test File (test/PiggyBank.t.sol)
+  // SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+import "forge-std/Test.sol";
+import "../src/PiggyBank.sol"; // Import the new PiggyBank contract
+
+contract PiggyBankTest is Test {
+    PiggyBank public piggyBank;
+    address public deployer;
+    address public user1;
+    address public user2;
+
+    function setUp() public {
+        deployer = makeAddr("deployer");
+        user1 = makeAddr("user1");
+        user2 = makeAddr("user2");
+
+        vm.startPrank(deployer);
+        piggyBank = new PiggyBank(); // Deploy the PiggyBank
+        vm.stopPrank();
+    }
+
+    function testDeposit() public {
+        uint256 depositAmount = 1 ether;
+
+        vm.startPrank(user1);
+        vm.deal(user1, depositAmount); // Fund user1
+        piggyBank.deposit{value: depositAmount}();
+        vm.stopPrank();
+
+        assertEq(piggyBank.balances(user1), depositAmount, "User1 balance should be 1 Ether after deposit");
+        assertEq(address(piggyBank).balance, depositAmount, "Contract balance should be 1 Ether");
+
+        // Expect the Deposit event
+        vm.expectEmit(true, true, false, true); // (user indexed, amount indexed, address, uint256) - check if you want amount indexed
+        emit Deposit(user1, depositAmount);
+
+        // Test depositing 0 Ether - should revert
+        vm.startPrank(user1);
+        vm.expectRevert("Deposit amount must be greater than zero.");
+        piggyBank.deposit{value: 0}();
+        vm.stopPrank();
+    }
+
+    function testWithdraw() public {
+        uint256 initialDeposit = 2 ether;
+        uint256 withdrawAmount = 1 ether;
+
+        // User1 deposits
+        vm.startPrank(user1);
+        vm.deal(user1, initialDeposit);
+        piggyBank.deposit{value: initialDeposit}();
+        vm.stopPrank();
+
+        // User1 withdraws
+        vm.startPrank(user1);
+        uint256 user1BalanceBeforeWithdraw = user1.balance;
+        piggyBank.withdraw(withdrawAmount);
+        vm.stopPrank();
+
+        assertEq(piggyBank.balances(user1), initialDeposit - withdrawAmount, "User1 balance should be 1 Ether after withdrawal");
+        assertEq(address(piggyBank).balance, initialDeposit - withdrawAmount, "Contract balance should be 1 Ether");
+        assertApproxEqAbs(user1.balance, user1BalanceBeforeWithdraw + withdrawAmount, 1e16, "User1 should receive withdrawn amount (approx due to gas)");
+
+        // Expect the Withdrawal event
+        vm.expectEmit(true, true, false, true);
+        emit Withdrawal(user1, withdrawAmount);
+
+        // Test over-withdrawal
+        vm.startPrank(user1);
+        vm.expectRevert("Insufficient balance.");
+        piggyBank.withdraw(2 ether); // Try to withdraw more than remaining 1 Ether
+        vm.stopPrank();
+
+        // Test zero withdrawal
+        vm.startPrank(user1);
+        vm.expectRevert("Withdrawal amount must be greater than zero.");
+        piggyBank.withdraw(0);
+        vm.stopPrank();
+    }
+
+    function testUnauthorizedWithdraw() public {
+        uint256 depositAmount = 1 ether;
+
+        // User1 deposits
+        vm.startPrank(user1);
+        vm.deal(user1, depositAmount);
+        piggyBank.deposit{value: depositAmount}();
+        vm.stopPrank();
+
+        // User2 tries to withdraw user1's funds - SHOULD FAIL
+        vm.startPrank(user2);
+        vm.expectRevert("Insufficient balance."); // Or similar revert message from require(balances[msg.sender] >= _amount)
+        piggyBank.withdraw(depositAmount);
+        vm.stopPrank();
+
+        // Verify balances are unchanged
+        assertEq(piggyBank.balances(user1), depositAmount, "User1 balance unchanged");
+        assertEq(piggyBank.balances(user2), 0, "User2 balance is 0");
+        assertEq(address(piggyBank).balance, depositAmount, "Contract balance unchanged");
+    }
+
+    function testOwnerWithdrawAllContractFunds() public {
+        uint256 initialDeposit = 5 ether;
+
+        // Deposit from user1 to put funds in contract
+        vm.startPrank(user1);
+        vm.deal(user1, initialDeposit);
+        piggyBank.deposit{value: initialDeposit}();
+        vm.stopPrank();
+
+        // Non-owner tries to withdraw all contract funds
+        vm.startPrank(user1);
+        vm.expectRevert("Only owner can call this function.");
+        piggyBank.ownerWithdrawAllContractFunds();
+        vm.stopPrank();
+
+        // Owner withdraws all contract funds
+        vm.startPrank(deployer);
+        uint256 ownerBalanceBeforeWithdraw = deployer.balance;
+        piggyBank.ownerWithdrawAllContractFunds();
+        vm.stopPrank();
+
+        assertEq(address(piggyBank).balance, 0, "Contract balance should be zero after owner withdrawal");
+        assertApproxEqAbs(deployer.balance, ownerBalanceBeforeWithdraw + initialDeposit, 1e16, "Owner should receive all contract funds");
+
+        vm.expectEmit(true, true, false, true);
+        emit Withdrawal(deployer, initialDeposit);
+    }
+}
+
+Deployment (script/DeployPiggyBank.s.sol):
+
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+import "forge-std/Script.sol";
+import "../src/PiggyBank.sol"; // Import the new PiggyBank contract
+
+contract DeployPiggyBank is Script {
+    function run() public returns (PiggyBank) {
+        vm.startBroadcast();
+
+        PiggyBank piggyBank = new PiggyBank();
+
+        vm.stopBroadcast();
+
+        console.log("PiggyBank deployed to:", address(piggyBank));
+
+        return piggyBank;
+    }
+}
